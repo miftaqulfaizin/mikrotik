@@ -15,14 +15,15 @@
 /system logging disable 0
 :delay 1
 
-# --- FLUSH KONEKSI SUBNET 24 & 25 ---
-/ip firewall connection
-:foreach i in=[find where (src-address~"192.168.24." or src-address~"192.168.25.") and reply-dst-address~$targetGateway] do={
-    remove $i
-}
-
 /ip route disable [find comment="DBN"]
 /routing rule disable [find comment="DBN"]
+:delay 1
+
+/ip firewall connection
+:foreach i in=[find where (src-address~"192.168\\.24\\." or src-address~"192.168\\.25\\.") and reply-dst-address~$targetGateway] do={
+    remove $i
+    }
+
 :delay 1
 /system logging enable 0
 } else={
