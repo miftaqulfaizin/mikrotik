@@ -1,0 +1,23 @@
+:local interface "sfp-sfpplus1-DBN"
+:delay 5
+:local traffic [/interface monitor-traffic $interface once as-value]
+:local rx ($traffic->"rx-bits-per-second")
+:local tx ($traffic->"tx-bits-per-second")
+
+# Hitung dalam bps, ubah ke Mbps (dibagi 1000000)
+:local rxMbps (($rx - 0) / 1000000)
+:local txMbps (($tx - 0) / 1000000)
+
+:log info "Traffic $interface -> RX: $rxMbps Mbps, TX: $txMbps Mbps"
+
+:if ($rxMbps <=100) do={
+/system logging disable 0
+
+:delay 1
+/ip route disable [find comment="DBN"]
+/routing rule disable [find comment="DBN"]
+:delay 1
+/system logging enable 0
+} else={
+#:log info "Trafik $interface Aman "
+}
