@@ -4,7 +4,11 @@
 /routing rule enable [find comment="DBN"]
 :delay 1
 /ip firewall connection
-:foreach i in=[find where src-address~"192.168\\.24\\."] do={ remove $i }
+:foreach i in=[find where src-address~"192.168\\.24\\." \
+and !(reply-dst-address~"192.168\\.33\\.19") \
+and !(reply-dst-address~"192.168\\.24\\.")] do={ 
+    remove $i 
+}
 :delay 1
 /system logging enable 0
 
@@ -17,6 +21,11 @@
 /routing rule enable [find comment="DBN"]
 :delay 1
 /ip firewall connection
-:foreach i in=[find where src-address~"192.168\\.24\\." or src-address~"192.168\\.25\\."] do={ remove $i }
+:foreach i in=[find where (src-address~"192.168\\.24\\." or src-address~"192.168\\.25\\.") \
+and !(reply-dst-address~"192.168\\.33\\.19") \
+and !(reply-dst-address~"192.168\\.24\\.") \
+and !(reply-dst-address~"192.168\\.25\\.")] do={ 
+    remove $i 
+}
 :delay 1
 /system logging enable 0
