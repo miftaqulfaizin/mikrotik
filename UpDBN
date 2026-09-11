@@ -1,0 +1,22 @@
+/system logging disable 0
+:delay 1
+/ip route enable [find comment="DBN"]
+/routing rule enable [find comment="DBN"]
+:delay 1
+/ip firewall connection
+:foreach i in=[find where src-address~"192.168\\.24\\."] do={ remove $i }
+:delay 1
+/system logging enable 0
+
+
+
+
+/system logging disable 0
+:delay 1
+/ip route enable [find comment="DBN"]
+/routing rule enable [find comment="DBN"]
+:delay 1
+/ip firewall connection
+:foreach i in=[find where src-address~"192.168\\.24\\." or src-address~"192.168\\.25\\."] do={ remove $i }
+:delay 1
+/system logging enable 0
