@@ -1,0 +1,27 @@
+#Ping Variables
+:local pingit "$host"
+:local cmac
+:local status
+:local CHID "";
+:local BotID "";
+
+#Capture system identity for email subject
+:local sysID [/system identity get name]
+ 
+#Capture current time for logging
+:local datetime "$[/system clock get date] $[/system clock get time]"
+
+:foreach o in [/tool netwatch find host=$pingit ] do={ 
+:set cmac [/tool netwatch get $o comment]
+:set status [/tool netwatch get $o status]
+:local HostStatus "- $cmac Status $status";
+:log info message="Telegram Ping Results $host $HostStatus" 
+
+:local pesan ("Result: $pingit $HostStatus %0A\
+Pingtest results for user $sysID $datetime")
+
+/tool fetch mode=https http-method=post \
+url=("https://api.telegram.org/bot".$BotID."/sendMessage") \
+http-data=("chat_id=".$CHID."&text=".$pesan) \
+keep-result=no
+}
