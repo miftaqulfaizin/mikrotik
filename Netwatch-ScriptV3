@@ -1,0 +1,185 @@
+:global netwatchLock
+:global riwayatDown
+
+# Inisialisasi variabel memori jika belum ada (misal setelah router reboot)
+:if ([:typeof $riwayatDown] != "array") do={
+    :set riwayatDown ({})
+}
+
+:if ($netwatchLock = true) do={
+    #:log warning "Netwatch script diabaikan karena proses sebelumnya masih berjalan."
+    :error "Script sedang berjalan"
+}
+:set netwatchLock true
+:delay 5
+
+:do {
+    :local CHID ""
+    :local BotID ""
+    :local maxTampil 15
+    :local maxTampilup 5
+
+    # --- VARIABEL PENAMPUNG ---
+    :local cmac
+    :local status
+    :local sysID [/system identity get name]
+    :local curDate [/system clock get date]
+    :local curTime [/system clock get time]
+
+    # Hitung detik jam sistem saat ini
+    :local curH [:tonum [:pick $curTime 0 2]]
+    :local curM [:tonum [:pick $curTime 3 5]]
+    :local curS [:tonum [:pick $curTime 6 8]]
+    :local curTotalSec (($curH * 3600) + ($curM * 60) + $curS)
+
+    :local totalDown 0
+    :local daftarDown ""
+
+    :local totalUpBaru 0
+    :local daftarUpBaru ""
+
+    # 1. Loop semua host di Netwatch yang berstatus "down"
+    :foreach o in=[/tool netwatch find status~"down"] do={ 
+        :local hostIP [/tool netwatch get $o host]
+        :local waktuDown [/tool netwatch get $o since]
+        :local netwatchName [/tool netwatch get $o name]
+        :set status [/tool netwatch get $o status]
+        
+        # Cari entry di Simple Queue yang target-nya cocok dengan IP Netwatch
+        :local qID [/queue simple find where target~"$hostIP/"]
+        :local maxRate 0
+        
+        :if ([:len $qID] > 0) do={
+            :local firstQ [:pick $qID 0]
+            :set cmac [/queue simple get $firstQ name]
+            
+            :local rateStr [/queue simple get $firstQ rate]
+            :local slashPos [:find $rateStr "/"]
+            :local upRate [:tonum [:pick $rateStr 0 $slashPos]]
+            :local downRate [:tonum [:pick $rateStr ($slashPos + 1) [:len $rateStr]]]
+            
+            :if ($upRate > $downRate) do={
+                :set maxRate $upRate
+            } else={
+                :set maxRate $downRate
+            }
+        } else={
+            :if ([:len $netwatchName] > 0) do={
+                :set cmac $netwatchName
+            } else={
+                :set cmac $hostIP
+            }
+        }
+        
+        # Cek apakah trafik di atas 100 Kbps (100.000 bps)
+        :if ($maxRate > 100000) do={
+            :log info message="Netwatch $cmac ($hostIP) status down, namun trafik aktif ($maxRate bps). Diabaikan."
+        } else={
+            # Catat IP ke memori $riwayatDown jika belum tercatat
+            :if ([:typeof [:find $riwayatDown $hostIP]] = "nil") do={
+                :set riwayatDown ($riwayatDown , $hostIP)
+            }
+
+            :set totalDown ($totalDown + 1)
+            :if ($totalDown <= $maxTampil) do={
+                :set daftarDown ($daftarDown . $totalDown . ". " . $cmac . " IP : " . $hostIP . "%0A    " . $waktuDown . "%0A")
+            }
+        }
+    }
+
+    # 2. Loop semua host di Netwatch yang berstatus "up"
+    :foreach u in=[/tool netwatch find status~"up"] do={
+        :local hostIP [/tool netwatch get $u host]
+        :local idxRiwayat [:find $riwayatDown $hostIP]
+
+        # Cek apakah IP ini sebelumnya tercatat pernah "down" di memori
+        :if ([:typeof $idxRiwayat] = "num") do={
+            :local waktuUp [/tool netwatch get $u since]
+            :local spacePos [:find $waktuUp " "]
+            
+            :if ([:typeof $spacePos] = "num") do={
+                :local upDate [:pick $waktuUp 0 $spacePos]
+                :local upTime [:pick $waktuUp ($spacePos + 1) [:len $waktuUp]]
+                
+                # Pastikan tanggal sama dengan hari ini
+                :if ($upDate = $curDate) do={
+                    :local upH [:tonum [:pick $upTime 0 2]]
+                    :local upM [:tonum [:pick $upTime 3 5]]
+                    :local upS [:tonum [:pick $upTime 6 8]]
+                    :local upTotalSec (($upH * 3600) + ($upM * 60) + $upS)
+                    
+                    :local selisih ($curTotalSec - $upTotalSec)
+                    
+                    # Jika selisih waktu antara 0 sampai 75 detik
+                    :if (($selisih >= 0) && ($selisih <= 75)) do={
+                        :local netwatchName [/tool netwatch get $u name]
+                        :local qID [/queue simple find where target~"$hostIP/"]
+                        :local namaClient $hostIP
+                        
+                        :if ([:len $qID] > 0) do={
+                            :set namaClient [/queue simple get [:pick $qID 0] name]
+                        } else={
+                            :if ([:len $netwatchName] > 0) do={
+                                :set namaClient $netwatchName
+                            }
+                        }
+                        
+                        :set totalUpBaru ($totalUpBaru + 1)
+                        :if ($totalUpBaru <= $maxTampilup) do={
+                            :set daftarUpBaru ($daftarUpBaru . $totalUpBaru . ". " . $namaClient . " IP : " . $hostIP . "%0A    " . $waktuUp . "%0A")
+                        }
+                    }
+                }
+            }
+
+            # Hapus IP dari memori $riwayatDown karena statusnya sudah kembali UP
+            :local tempArray ({})
+            :foreach item in=$riwayatDown do={
+                :if ($item != $hostIP) do={
+                    :set tempArray ($tempArray , $item)
+                }
+            }
+            :set riwayatDown $tempArray
+        }
+    }
+
+    # 3. Kirim satu pesan ringkasan ke Telegram jika ada host Down ATAU Baru Online
+    :if (($totalDown > 0) || ($totalUpBaru > 0)) do={
+        :local bagianDown ""
+        :if ($totalDown > 0) do={
+            :local infoTambahanDown ""
+            :if ($totalDown > $maxTampil) do={
+                :local sisaDown ($totalDown - $maxTampil)
+                :set infoTambahanDown ("...dan " . $sisaDown . " lainnya.%0A")
+            }
+            :set bagianDown ("\F0\9F\94\B4 Total Koneksi Down: $totalDown%0A$daftarDown$infoTambahanDown%0A")
+        }
+
+        :local bagianUp ""
+        :if ($totalUpBaru > 0) do={
+            :local infoTambahanUp ""
+            :if ($totalUpBaru > $maxTampilup) do={
+                :local sisaUp ($totalUpBaru - $maxTampilup)
+                :set infoTambahanUp ("...dan " . $sisaUp . " lainnya.%0A")
+            }
+            :set bagianUp ("\F0\9F\9F\A2 BARU ONLINE : $totalUpBaru%0A$daftarUpBaru$infoTambahanUp")
+        }
+        
+        :local pesan ("\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\0A *======>$sysID<======*%0A\
+\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\E2\94\81\0A   \F0\9F\94\B4 STATUS JARINGAN \F0\9F\94\B4\0A\0A\
+$bagianDown%0A$bagianUp&parse_mode=markdown")
+
+        :log info message="Monitoring Jaringan: Mengirim laporan ($totalDown down, $totalUpBaru baru online)."
+
+        /tool fetch mode=https http-method=post \
+        url=("https://api.telegram.org/bot" . $BotID . "/sendMessage") \
+        http-data=("chat_id=" . $CHID . "&text=" . $pesan) \
+        keep-result=no
+    }
+} on-error={
+    :log error "Terjadi kesalahan saat menjalankan script Netwatch"
+}
+
+# --- Lepas kunci (Lock) setelah script selesai ---
+:delay 10
+:set netwatchLock false
